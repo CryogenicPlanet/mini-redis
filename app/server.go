@@ -1,29 +1,24 @@
 package main
 
 import (
-	"bufio"
 	"fmt"
+	"io/ioutil"
 	"log"
-	"strings"
 
 	// Uncomment this block to pass the first stage
 	"net"
 	"os"
 )
 
+func parseMessage()
+
 func handleConnection(conn net.Conn) {
 	defer conn.Close()
-	scanner := bufio.NewScanner(conn)
-	for scanner.Scan() {
-		message := scanner.Text()
-		fmt.Println("Message Received:", message)
-		newMessage := strings.ToUpper(message)
-		conn.Write([]byte(newMessage + "\n"))
-	}
+	data, err := ioutil.ReadAll(conn)
 
-	if err := scanner.Err(); err != nil {
-		fmt.Println("error:", err)
-	}
+	fmt.Println("error:", err)
+	fmt.Println("Message", string(data))
+	conn.Write([]byte("Test"))
 }
 
 func main() {
