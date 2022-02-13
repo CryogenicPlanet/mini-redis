@@ -1,8 +1,8 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
-	"io/ioutil"
 	"log"
 	"strings"
 
@@ -22,37 +22,39 @@ func handleMessage(message string) (string, error) {
 
 	fmt.Println("Splits", splits)
 
-	// firstSplit := []rune(splits[0])
+	firstSplit := []rune(splits[0])
 
-	// if firstSplit[0] != '*' {
-	// 	// Not an valid RESP message
-	// 	return "", fmt.Errorf("Not a valid RESP message")
-	// }
+	if firstSplit[0] != '*' {
+		// Not an valid RESP message
+		return "", fmt.Errorf("Not a valid RESP message")
+	}
 
-	// arrSize := int(firstSplit[1])
+	arrSize := int(firstSplit[1])
 
-	// if arrSize == 0 {
-	// 	return "", fmt.Errorf("Null RESP Array")
-	// }
+	if arrSize == 0 {
+		return "", fmt.Errorf("Null RESP Array")
+	}
 
 	return toRESPString("PONG"), nil
 }
 
 func handleConnection(conn net.Conn) {
-	data, err := ioutil.ReadAll(conn)
+	fmt.Println("Waiting for connections ...")
+	message, err := bufio.NewReader(conn).ReadString('\n')
+	defer conn.Close()
 
 	if err != nil {
 		fmt.Println("error:", err)
 	}
-	message := string(data)
-	fmt.Println("Message", []rune(message))
+	fmt.Println("Message", message)
 	response, err := handleMessage(message)
-	fmt.Println("Response", []rune(response))
 
 	if err != nil {
 		fmt.Println("Error:", err)
 		conn.Write([]byte("Invalid RESP\n"))
+		return
 	}
+	fmt.Println("Response", response)
 
 	conn.Write([]byte(response))
 }
