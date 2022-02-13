@@ -10,8 +10,6 @@ import (
 	"os"
 )
 
-func parseMessage()
-
 func handleConnection(conn net.Conn) {
 	defer conn.Close()
 	data, err := ioutil.ReadAll(conn)
