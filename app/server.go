@@ -14,7 +14,9 @@ func handleConnection(conn net.Conn) {
 	defer conn.Close()
 	data, err := ioutil.ReadAll(conn)
 
-	fmt.Println("error:", err)
+	if err != nil {
+		fmt.Println("error:", err)
+	}
 	fmt.Println("Message", string(data))
 	conn.Write([]byte("Test"))
 }
