@@ -14,6 +14,7 @@ import (
 
 var responses = make(chan string, 10)
 var responseWg sync.WaitGroup
+var arrWg sync.WaitGroup
 
 func toRESPString(message string) string {
 	return "+" + message + "\r\n"
@@ -102,12 +103,14 @@ func parseRedisData(reader bufio.Reader) (redisData, error) {
 			}
 
 			fmt.Println("Size byte", size)
+			arrWg.Add(size)
 			for i := 0; i < size; i++ {
 				data, err := parseRedisData(reader)
 				if err != nil {
 					return data, err
 				}
 				data.array = append(data.array, data)
+				arrWg.Done()
 			}
 			return data, nil
 		}
@@ -136,6 +139,7 @@ func handleConnection(conn net.Conn) {
 	}
 	go writeResponse(conn)
 	responseWg.Wait()
+	arrWg.Wait()
 	defer conn.Close()
 }
 
