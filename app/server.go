@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log"
 	"strconv"
-	"strings"
 	"sync"
 
 	// Uncomment this block to pass the first stage
@@ -28,53 +27,107 @@ func writeResponse(conn net.Conn) {
 	}
 }
 
-// Expect every message to be in RESP and be an Array of bulk strings
-func handleMessage(message string) error {
+type redisData struct {
+	simpleString string
+	errorString  []byte
+	bulkString   string
+	integer      int
+	array        []redisData
+}
 
-	splits := strings.Split(message, `\r\n`)
-
-	fmt.Println("Splits", splits)
-
-	firstSplit := []rune(splits[0])
-
-	if firstSplit[0] != '*' {
-		// Not an valid RESP message
-		return fmt.Errorf("Not a valid RESP message")
-	}
-
-	arrSize, err := strconv.Atoi(string(firstSplit[1]))
-
-	fmt.Println("Arr size", arrSize, firstSplit)
-
-	if arrSize == 0 || err != nil {
-		return fmt.Errorf("Null RESP Array")
-	}
-
-	if arrSize > 1 {
-		// Have to loop over messages
-		for i := 0; i < arrSize; i++ {
-			fmt.Println("Responded to X PING", i)
+func execRedisData(redisData []redisData) {
+	for _, request := range redisData {
+		if request.bulkString != "" {
 			responses <- toRESPString("PONG")
 			responseWg.Add(1)
 		}
-		return nil
+	}
+}
+
+// Expect every message to be in RESP and be an Array of bulk strings
+func parseRedisData(reader bufio.Reader) (redisData, error) {
+	dataByte, err := reader.ReadByte()
+	data := redisData{}
+	fmt.Println("Data byte", string(dataByte))
+
+	if err != nil {
+		// Not an valid RESP message
+		return data, fmt.Errorf("Not a valid RESP message")
 	}
 
-	responses <- toRESPString("PONG")
-	responseWg.Add(1)
+	switch string(dataByte) {
+	case "$":
+		{
+			// This is a bulkString
+			// fmt.Println("This is a bulk string byte")
+			sizeByte, err := reader.ReadByte()
+			// trim off the \r\n
+			_, err = reader.ReadBytes('\n')
+			if err != nil {
+				// Not an valid RESP message
+				return data, fmt.Errorf("No size byte in bulk string")
+			}
 
-	return nil
+			size, err := strconv.Atoi(string(sizeByte))
+
+			if err != nil {
+				// Not an valid RESP message
+				return data, fmt.Errorf("Size byte is not number")
+			}
+			msg := make([]byte, size)
+			reader.Read(msg)
+			data.bulkString = string(msg)
+			// fmt.Println("Message", string(msg))
+			responses <- toRESPString("PONG")
+			responseWg.Add(1)
+			return data, nil
+
+		}
+	case "*":
+		{
+			// This is a Array
+			sizeByte, err := reader.ReadByte()
+			// trim off the \r\n
+			_, err = reader.ReadBytes('\n')
+
+			if err != nil {
+				// Not an valid RESP message
+				return data, fmt.Errorf("No size byte in array")
+			}
+			size, err := strconv.Atoi(string(sizeByte))
+
+			if err != nil {
+				// Not an valid RESP message
+				return data, fmt.Errorf("Size byte is not number")
+			}
+
+			fmt.Println("Size byte", size)
+			for i := 0; i < size; i++ {
+				data, err := parseRedisData(reader)
+				if err != nil {
+					return data, err
+				}
+				data.array = append(data.array, data)
+			}
+			return data, nil
+		}
+	case "\r":
+	case "\n":
+		// If the byte is part of a CLRF, return empty
+		return data, nil
+	default:
+		return data, fmt.Errorf("Not a valid RESP message")
+	}
+
+	return data, nil
 }
 
 func handleConnection(conn net.Conn) {
 	fmt.Println("Waiting for connections ...")
-	message, err := bufio.NewReader(conn).ReadString('\n')
 
-	if err != nil {
-		fmt.Println("error:", err)
-	}
-	fmt.Println("Message", message)
-	err = handleMessage(message)
+	reader := bufio.NewReader(conn)
+
+	_, err := parseRedisData(*reader)
 
 	if err != nil {
 		fmt.Println("Error:", err)
