@@ -20,10 +20,12 @@ func toRESPString(message string) string {
 	return "+" + message + "\r\n"
 }
 
-func writeResponse(conn net.Conn) {
+func writeResponse(writer bufio.Writer) {
 	for response := range responses {
 		fmt.Print("Response", response)
-		conn.Write([]byte(response))
+		n, err := writer.Write([]byte(response))
+		fmt.Println("Written", n, "bytes with", err, "errors to conn")
+		writer.Flush()
 		responseWg.Done()
 	}
 }
@@ -129,6 +131,7 @@ func handleConnection(conn net.Conn) {
 	fmt.Println("Waiting for connections ...")
 
 	reader := bufio.NewReader(conn)
+	writer := bufio.NewWriter(conn)
 
 	_, err := parseRedisData(*reader)
 
@@ -137,9 +140,8 @@ func handleConnection(conn net.Conn) {
 		conn.Write([]byte("Invalid RESP\n"))
 		return
 	}
-	go writeResponse(conn)
+	go writeResponse(*writer)
 	fmt.Println("Waiting for responses ...")
-	defer conn.Close()
 	responseWg.Wait()
 	arrWg.Wait()
 }
