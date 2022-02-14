@@ -22,7 +22,7 @@ func toRESPString(message string) string {
 
 func writeResponse(conn net.Conn) {
 	for response := range responses {
-		fmt.Println("Response", response)
+		fmt.Print("Response", response)
 		conn.Write([]byte(response))
 		responseWg.Done()
 	}
@@ -138,6 +138,7 @@ func handleConnection(conn net.Conn) {
 		return
 	}
 	go writeResponse(conn)
+	fmt.Println("Waiting for responses ...")
 	responseWg.Wait()
 	arrWg.Wait()
 	defer conn.Close()
