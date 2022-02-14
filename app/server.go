@@ -128,6 +128,13 @@ func parseRedisData(reader bufio.Reader) (redisData, error) {
 func handleConnection(conn net.Conn) {
 	fmt.Println("Waiting for connections ...")
 
+	if cw, ok := conn.(interface{ CloseWrite() error }); ok {
+		defer fmt.Println("Closing write ...")
+		defer cw.CloseWrite()
+	} else {
+		fmt.Println("[ERROR] Connection doesn't implement CloseWrite method")
+	}
+
 	reader := bufio.NewReader(conn)
 
 	_, err := parseRedisData(*reader)
