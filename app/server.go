@@ -141,7 +141,6 @@ func handleConnection(conn net.Conn) {
 	fmt.Println("Waiting for responses ...")
 	responseWg.Wait()
 	arrWg.Wait()
-	defer conn.Close()
 }
 
 func main() {
