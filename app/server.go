@@ -7,8 +7,8 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
-	// Uncomment this block to pass the first stage
 	"net"
 	"os"
 )
@@ -23,6 +23,10 @@ func toRESPString(message string) string {
 	return "+" + message + "\r\n"
 }
 
+func nilRESP() string {
+	return "$-1\r\n"
+}
+
 func writeResponse(writer *bufio.Writer, response string) {
 	fmt.Print("Response", response)
 	writer.Write([]byte(response))
@@ -32,7 +36,13 @@ func writeResponse(writer *bufio.Writer, response string) {
 
 type commandType int
 
-var database map[string]string
+var database map[string]entry
+
+type entry struct {
+	hasEntry   bool
+	value      []byte
+	expiryTime time.Time
+}
 
 const (
 	None commandType = iota
@@ -42,17 +52,9 @@ const (
 	GET
 )
 
-// type redisData struct {
-// 	// simpleString string
-// 	// errorString  []byte
-// 	bulkString string
-// 	// integer      int
-// 	array []redisData
-// }
-
 type redisCmd struct {
 	commandType commandType
-	redisData   []string
+	redisData   [][]byte
 }
 
 func parseCommandType(msg string) commandType {
@@ -85,7 +87,7 @@ func parseRedisData(scanner *bufio.Scanner) (redisCmd, error) {
 		{
 			if scanner.Scan() {
 				msg := scanner.Text()
-				data.redisData = append(data.redisData, msg)
+				data.redisData = append(data.redisData, []byte(msg))
 				fmt.Println("Message", string(msg))
 				if data.commandType == None {
 					// Command Type unset and should be set
@@ -162,29 +164,56 @@ func executeRedisData(redisCmd redisCmd, writer *bufio.Writer) error {
 	case PING:
 		responseVal := "PONG"
 		if len(redisCmd.redisData) > 1 {
-			responseVal = redisCmd.redisData[1] // second param
+			responseVal = string(redisCmd.redisData[1]) // second param
 		}
 		go writeResponse(writer, toRESPString(responseVal))
 		responseWg.Add(1)
 		return nil
 	case ECHO:
-		responseVal := redisCmd.redisData[1] // second param
+		responseVal := string(redisCmd.redisData[1]) // second param
 		go writeResponse(writer, toRESPString(responseVal))
 		responseWg.Add(1)
 		return nil
 	case SET:
-		key := redisCmd.redisData[1] // second param
-		val := redisCmd.redisData[2] // third param
+		key := string(redisCmd.redisData[1]) // second param
+		val := redisCmd.redisData[2]         // third param
+		var px string
+		expiry := 0
+		if len(redisCmd.redisData) > 2 {
+			px = string(redisCmd.redisData[3])
+			expiry, _ = strconv.Atoi(string(redisCmd.redisData[4]))
+		}
+		hasExpiry := strings.ToUpper(px) == "PX"
 
-		database[key] = val
+		if _, ok := database[key]; !ok {
+			database[key] = entry{hasEntry: hasExpiry, value: val, expiryTime: time.Now().Add(time.Millisecond * time.Duration(expiry))}
+		}
+
+		database[key] = entry{hasEntry: hasExpiry, value: val, expiryTime: time.Now().Add(time.Millisecond * time.Duration(expiry))}
 		go writeResponse(writer, toRESPString("OK"))
 		responseWg.Add(1)
 		return nil
 	case GET:
-		key := redisCmd.redisData[1] // second param
-		go writeResponse(writer, toRESPString(database[key]))
+		key := string(redisCmd.redisData[1]) // second param
+		if _, ok := database[key]; !ok {
+			go writeResponse(writer, nilRESP())
+			responseWg.Add(1)
+			return nil
+		}
+		entry := database[key]
+		if entry.hasEntry {
+			if entry.expiryTime.Before(time.Now()) {
+				delete(database, key)
+				go writeResponse(writer, nilRESP())
+				responseWg.Add(1)
+				return nil
+			}
+		}
+
+		go writeResponse(writer, toRESPString(string(entry.value)))
 		responseWg.Add(1)
 		return nil
+
 	default:
 		return fmt.Errorf("Invalid command, nothing to execute", redisCmd.commandType)
 	}
@@ -217,7 +246,7 @@ func handleConnection(conn net.Conn) {
 }
 
 func main() {
-	database = make(map[string]string)
+	database = make(map[string]entry)
 	// You can use print statements as follows for debugging, they'll be visible when running tests.
 	fmt.Println("Logs from your program will appear here!")
 
