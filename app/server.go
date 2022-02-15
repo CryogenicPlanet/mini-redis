@@ -32,6 +32,8 @@ func writeResponse(writer *bufio.Writer, response string) {
 
 type commandType int
 
+var database map[string]string
+
 const (
 	None commandType = iota
 	PING
@@ -168,6 +170,18 @@ func executeRedisData(redisCmd redisCmd, writer *bufio.Writer) error {
 	case ECHO:
 		responseVal := redisCmd.redisData[1] // second param
 		go writeResponse(writer, toRESPString(responseVal))
+		responseWg.Add(1)
+		return nil
+	case SET:
+		key := redisCmd.redisData[1] // second param
+		val := redisCmd.redisData[2] // third param
+		database[key] = val
+		go writeResponse(writer, toRESPString("OK"))
+		responseWg.Add(1)
+		return nil
+	case GET:
+		key := redisCmd.redisData[1] // second param
+		go writeResponse(writer, toRESPString(database[key]))
 		responseWg.Add(1)
 		return nil
 	default:
