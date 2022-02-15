@@ -175,6 +175,7 @@ func executeRedisData(redisCmd redisCmd, writer *bufio.Writer) error {
 	case SET:
 		key := redisCmd.redisData[1] // second param
 		val := redisCmd.redisData[2] // third param
+
 		database[key] = val
 		go writeResponse(writer, toRESPString("OK"))
 		responseWg.Add(1)
@@ -216,6 +217,7 @@ func handleConnection(conn net.Conn) {
 }
 
 func main() {
+	database = make(map[string]string)
 	// You can use print statements as follows for debugging, they'll be visible when running tests.
 	fmt.Println("Logs from your program will appear here!")
 
