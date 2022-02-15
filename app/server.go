@@ -106,10 +106,9 @@ func parseRedisData(scanner *bufio.Scanner) (redisCmd, error) {
 
 			fmt.Println("Size byte", size)
 
-			if scanner.Scan() {
-
-				arrWg.Add(size)
-				if size == 1 {
+			arrWg.Add(size)
+			if size == 1 {
+				if scanner.Scan() {
 
 					newData, err := parseRedisData(scanner)
 					if err != nil {
@@ -120,8 +119,11 @@ func parseRedisData(scanner *bufio.Scanner) (redisCmd, error) {
 					}
 					data.redisData = append(data.redisData, newData.redisData...)
 					arrWg.Done()
-				} else {
-					for i := 0; i < size; i++ {
+				}
+			} else {
+				for i := 0; i < size; i++ {
+					if scanner.Scan() {
+
 						newData, err := parseRedisData(scanner)
 						if err != nil {
 							fmt.Println("Error in recursion", err)
@@ -132,14 +134,14 @@ func parseRedisData(scanner *bufio.Scanner) (redisCmd, error) {
 						}
 						data.redisData = append(data.redisData, newData.redisData...)
 						arrWg.Done()
-						scanner.Scan()
+						fmt.Println("Finishing loop", i)
 					}
-					fmt.Println("Looped data", data)
+
 				}
-				return data, nil
-			} else {
-				return data, fmt.Errorf("Could not read data in array")
+				fmt.Println("Looped data", data)
 			}
+			return data, nil
+
 		}
 	case "\r":
 	case "\n":
