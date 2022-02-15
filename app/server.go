@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"strconv"
+	"strings"
 	"sync"
 
 	// Uncomment this block to pass the first stage
@@ -29,17 +30,47 @@ func writeResponse(writer *bufio.Writer, response string) {
 	responseWg.Done()
 }
 
-type redisData struct {
-	simpleString string
-	errorString  []byte
-	bulkString   string
-	integer      int
-	array        []redisData
+type commandType int
+
+const (
+	None commandType = iota
+	PING
+	ECHO
+	SET
+	GET
+)
+
+// type redisData struct {
+// 	// simpleString string
+// 	// errorString  []byte
+// 	bulkString string
+// 	// integer      int
+// 	array []redisData
+// }
+
+type redisCmd struct {
+	commandType commandType
+	redisData   []string
+}
+
+func parseCommandType(msg string) commandType {
+	switch strings.ToUpper(msg) {
+	case "PING":
+		return PING
+	case "ECHO":
+		return ECHO
+	case "SET":
+		return SET
+	case "GET":
+		return GET
+	default:
+		return None
+	}
 }
 
 // Expect every message to be in RESP and be an Array of bulk strings
-func parseRedisData(scanner *bufio.Scanner, writer *bufio.Writer) (redisData, error) {
-	data := redisData{}
+func parseRedisData(scanner *bufio.Scanner) (redisCmd, error) {
+	data := redisCmd{commandType: None}
 
 	dataLine := scanner.Text()
 
@@ -52,10 +83,13 @@ func parseRedisData(scanner *bufio.Scanner, writer *bufio.Writer) (redisData, er
 		{
 			if scanner.Scan() {
 				msg := scanner.Text()
-				data.bulkString = string(msg)
+				data.redisData = append(data.redisData, msg)
 				fmt.Println("Message", string(msg))
-				go writeResponse(writer, toRESPString("PONG"))
-				responseWg.Add(1)
+				if data.commandType == None {
+					// Command Type unset and should be set
+					cmdType := parseCommandType(msg)
+					data.commandType = cmdType
+				}
 				return data, nil
 			} else {
 				return data, fmt.Errorf("Could not read message in bulk string")
@@ -77,21 +111,30 @@ func parseRedisData(scanner *bufio.Scanner, writer *bufio.Writer) (redisData, er
 				arrWg.Add(size)
 				if size == 1 {
 
-					data, err := parseRedisData(scanner, writer)
+					newData, err := parseRedisData(scanner)
 					if err != nil {
 						return data, err
 					}
-					data.array = append(data.array, data)
+					if data.commandType == None {
+						data.commandType = newData.commandType
+					}
+					data.redisData = append(data.redisData, newData.redisData...)
 					arrWg.Done()
 				} else {
 					for i := 0; i < size; i++ {
-						data, err := parseRedisData(scanner, writer)
+						newData, err := parseRedisData(scanner)
 						if err != nil {
+							fmt.Println("Error in recursion", err)
 							return data, err
 						}
-						data.array = append(data.array, data)
+						if data.commandType == None {
+							data.commandType = newData.commandType
+						}
+						data.redisData = append(data.redisData, newData.redisData...)
 						arrWg.Done()
+						scanner.Scan()
 					}
+					fmt.Println("Looped data", data)
 				}
 				return data, nil
 			} else {
@@ -110,6 +153,26 @@ func parseRedisData(scanner *bufio.Scanner, writer *bufio.Writer) (redisData, er
 	return data, fmt.Errorf("Unreachable code")
 }
 
+func executeRedisData(redisCmd redisCmd, writer *bufio.Writer) error {
+	switch redisCmd.commandType {
+	case PING:
+		responseVal := "PONG"
+		if len(redisCmd.redisData) > 1 {
+			responseVal = redisCmd.redisData[1] // second param
+		}
+		go writeResponse(writer, toRESPString(responseVal))
+		responseWg.Add(1)
+		return nil
+	case ECHO:
+		responseVal := redisCmd.redisData[1] // second param
+		go writeResponse(writer, toRESPString(responseVal))
+		responseWg.Add(1)
+		return nil
+	default:
+		return fmt.Errorf("Invalid command, nothing to execute", redisCmd.commandType)
+	}
+}
+
 func handleConnection(conn net.Conn) {
 	fmt.Println("Waiting for connections ...")
 
@@ -118,13 +181,19 @@ func handleConnection(conn net.Conn) {
 	scanner := bufio.NewScanner(reader)
 
 	for scanner.Scan() {
-		_, err := parseRedisData(scanner, writer)
-		if err != nil {
-			fmt.Println("Error:", err)
-			conn.Write([]byte("Invalid RESP\n"))
-			return
+		line := scanner.Text()
+		if strings.Contains(line, "*") {
+			data, err := parseRedisData(scanner)
+			executeRedisData(data, writer)
+			fmt.Println("Data is", data)
+			if err != nil {
+				fmt.Println("Error:", err)
+				conn.Write([]byte("Invalid RESP\n"))
+				return
+			}
 		}
 	}
+
 	arrWg.Wait()
 	responseWg.Wait()
 
