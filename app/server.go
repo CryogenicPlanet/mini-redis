@@ -15,7 +15,6 @@ import (
 var Yellow = "\033[33m"
 var Reset = "\033[0m"
 
-var responses = make(chan string, 10)
 var responseWg sync.WaitGroup
 var arrWg sync.WaitGroup
 
@@ -23,14 +22,11 @@ func toRESPString(message string) string {
 	return "+" + message + "\r\n"
 }
 
-func writeResponse(writer bufio.Writer) {
-	for response := range responses {
-		fmt.Print("Response", response)
-		writer.Write([]byte(response))
-		// fmt.Println("Written", n, "bytes with", err, "errors to conn")
-		writer.Flush()
-		responseWg.Done()
-	}
+func writeResponse(writer *bufio.Writer, response string) {
+	fmt.Print("Response", response)
+	writer.Write([]byte(response))
+	writer.Flush()
+	responseWg.Done()
 }
 
 type redisData struct {
@@ -41,18 +37,8 @@ type redisData struct {
 	array        []redisData
 }
 
-func execRedisData(redisData []redisData) {
-	for _, request := range redisData {
-		if request.bulkString != "" {
-			responses <- toRESPString("PONG")
-			responseWg.Add(1)
-		}
-	}
-}
-
 // Expect every message to be in RESP and be an Array of bulk strings
-func parseRedisData(reader *bufio.Reader, scanner *bufio.Scanner) (redisData, error) {
-	fmt.Println("parseRedisData")
+func parseRedisData(scanner *bufio.Scanner, writer *bufio.Writer) (redisData, error) {
 	data := redisData{}
 
 	dataLine := scanner.Text()
@@ -68,7 +54,7 @@ func parseRedisData(reader *bufio.Reader, scanner *bufio.Scanner) (redisData, er
 				msg := scanner.Text()
 				data.bulkString = string(msg)
 				fmt.Println("Message", string(msg))
-				responses <- toRESPString("PONG")
+				go writeResponse(writer, toRESPString("PONG"))
 				responseWg.Add(1)
 				return data, nil
 			} else {
@@ -90,9 +76,8 @@ func parseRedisData(reader *bufio.Reader, scanner *bufio.Scanner) (redisData, er
 
 				arrWg.Add(size)
 				if size == 1 {
-					fmt.Println("Recursion single")
 
-					data, err := parseRedisData(reader, scanner)
+					data, err := parseRedisData(scanner, writer)
 					if err != nil {
 						return data, err
 					}
@@ -100,7 +85,7 @@ func parseRedisData(reader *bufio.Reader, scanner *bufio.Scanner) (redisData, er
 					arrWg.Done()
 				} else {
 					for i := 0; i < size; i++ {
-						data, err := parseRedisData(reader, scanner)
+						data, err := parseRedisData(scanner, writer)
 						if err != nil {
 							return data, err
 						}
@@ -129,22 +114,20 @@ func handleConnection(conn net.Conn) {
 	fmt.Println("Waiting for connections ...")
 
 	writer := bufio.NewWriter(conn)
-	go writeResponse(*writer)
 	reader := bufio.NewReader(conn)
 	scanner := bufio.NewScanner(reader)
 
 	for scanner.Scan() {
-		_, err := parseRedisData(reader, scanner)
+		_, err := parseRedisData(scanner, writer)
 		if err != nil {
 			fmt.Println("Error:", err)
 			conn.Write([]byte("Invalid RESP\n"))
 			return
 		}
 	}
-
-	fmt.Println("Waiting for responses ...")
-	responseWg.Wait()
 	arrWg.Wait()
+	responseWg.Wait()
+
 }
 
 func main() {
