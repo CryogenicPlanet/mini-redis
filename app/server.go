@@ -40,7 +40,7 @@ var database map[string]entry
 
 type entry struct {
 	hasEntry   bool
-	value      []byte
+	value      string
 	expiryTime time.Time
 }
 
@@ -54,7 +54,7 @@ const (
 
 type redisCmd struct {
 	commandType commandType
-	redisData   [][]byte
+	redisData   []string
 }
 
 func parseCommandType(msg string) commandType {
@@ -87,7 +87,7 @@ func parseRedisData(scanner *bufio.Scanner) (redisCmd, error) {
 		{
 			if scanner.Scan() {
 				msg := scanner.Text()
-				data.redisData = append(data.redisData, []byte(msg))
+				data.redisData = append(data.redisData, msg)
 				fmt.Println("Message", string(msg))
 				if data.commandType == None {
 					// Command Type unset and should be set
@@ -179,7 +179,7 @@ func executeRedisData(redisCmd redisCmd, writer *bufio.Writer) error {
 		val := redisCmd.redisData[2]         // third param
 		var px string
 		expiry := 0
-		if len(redisCmd.redisData) > 2 {
+		if len(redisCmd.redisData) > 3 {
 			px = string(redisCmd.redisData[3])
 			expiry, _ = strconv.Atoi(string(redisCmd.redisData[4]))
 		}
